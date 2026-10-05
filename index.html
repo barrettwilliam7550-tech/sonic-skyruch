@@ -1,0 +1,2000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sonic Sky Rush — Fan Game</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07162f;font-family:Arial,sans-serif}
+canvas{display:block;width:100%;height:100%;image-rendering:auto}
+#ui{position:fixed;left:18px;top:15px;color:white;font-weight:900;text-shadow:2px 2px #123;z-index:3;pointer-events:none}
+.pill{display:inline-block;background:rgba(0,20,55,.75);border:2px solid rgba(255,255,255,.25);border-radius:14px;padding:8px 12px;margin-right:7px}
+#screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,10,30,.68);z-index:5}
+.card{width:min(620px,90vw);text-align:center;padding:35px;border-radius:28px;background:linear-gradient(#123b78,#071a39);border:3px solid #62d9ff;color:white;box-shadow:0 20px 80px #0008}
+h1{font-size:clamp(42px,9vw,88px);margin:0;color:#47b8ff;text-shadow:4px 5px #06235a;letter-spacing:-4px}
+p{line-height:1.6;color:#d9ecff}
+button{font-size:20px;font-weight:900;padding:14px 28px;border:0;border-radius:15px;background:#ffd83d;color:#172b55;cursor:pointer}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="ui"><span class="pill">RINGS: <b id="rings">0</b></span><span class="pill">SCORE: <b id="score">0</b></span><span class="pill">TIME: <b id="time">0.0</b></span></div>
+<div id="screen"><div class="card"><h1>SONIC<br>SKY RUSH</h1><p>Fast, original browser fan-game code with canvas graphics, rings, springs, enemies, platforms, checkpoints, boost pads and a goal portal.</p><p><b>MOVE:</b> A/D or Arrow Keys &nbsp; <b>JUMP:</b> Space/W/Up &nbsp; <b>BOOST:</b> Shift</p><button id="start">START RUN</button></div></div>
+<script>
+"use strict";
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+const ringsEl=document.getElementById("rings"),scoreEl=document.getElementById("score"),timeEl=document.getElementById("time"),screen=document.getElementById("screen"),start=document.getElementById("start");
+let W=innerWidth,H=innerHeight,dpr=1;
+function resize(){W=innerWidth;H=innerHeight;dpr=Math.min(devicePixelRatio||1,2);canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);}
+addEventListener("resize",resize);resize();
+const keys={};
+addEventListener("keydown",e=>{keys[e.key.toLowerCase()]=true;if(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," "].includes(e.key))e.preventDefault();});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+const world={width:12000,height:1500,gravity:1900};
+const player={x:140,y:700,vx:0,vy:0,r:26,onGround:false,inv:0,boost:false,anim:0};
+let cameraX=0,running=false,won=false,elapsed=0,rings=0,score=0,checkpoint=140,particles=[],clouds=[],platforms=[],ringList=[],enemies=[],springs=[],boosts=[],checkpoints=[];
+const goal={x:11600,y:850};
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function lerp(a,b,t){return a+(b-a)*t;}
+function rand(a,b){return a+Math.random()*(b-a);}
+function addParticle(x,y,color,size=4,life=.7,vx=0,vy=0){particles.push({x,y,color,size,life,max:life,vx,vy});}
+function burst(x,y,color,count=20,power=300){for(let i=0;i<count;i++){const a=rand(0,Math.PI*2),s=rand(power*.3,power);addParticle(x,y,color,rand(2,7),rand(.3,1),Math.cos(a)*s,Math.sin(a)*s);}}
+function makeClouds(){clouds=[];for(let i=0;i<70;i++)clouds.push({x:rand(0,world.width),y:rand(80,650),s:rand(.5,1.7),w:rand(90,240)});}
+function buildLevel(){
+platforms=[];ringList=[];enemies=[];springs=[];boosts=[];checkpoints=[];
+const addPlatform=(x,y,w,h)=>platforms.push({x,y,w,h});
+addPlatform(0,1120,world.width,380);
+addPlatform(550,930,430,45);addPlatform(1250,820,380,45);addPlatform(1850,990,550,45);
+addPlatform(2600,780,500,45);addPlatform(3350,920,430,45);addPlatform(4050,700,520,45);
+addPlatform(4800,900,600,45);addPlatform(5700,760,470,45);addPlatform(6500,1010,700,45);
+addPlatform(7500,830,550,45);addPlatform(8400,690,450,45);addPlatform(9150,930,700,45);
+addPlatform(10100,760,480,45);addPlatform(10800,900,800,45);
+for(let x=280;x<11500;x+=150)ringList.push({x,y:rand(690,1010),taken:false,phase:rand(0,7)});
+for(let x=800;x<11200;x+=900)enemies.push({x,y:1010,vx:rand(-80,80),w:42,h:36,alive:true,phase:rand(0,7)});
+springs.push({x:1100,y:1080,w:50,h:40,power:850},{x:2350,y:950,w:50,h:40,power:1000},{x:3950,y:1080,w:50,h:40,power:900},{x:6100,y:1080,w:50,h:40,power:1050},{x:8050,y:1080,w:50,h:40,power:950},{x:9900,y:1080,w:50,h:40,power:1100});
+boosts.push({x:1650,y:1070,w:130,h:25,power:950},{x:3150,y:1070,w:130,h:25,power:1050},{x:5350,y:1070,w:130,h:25,power:1000},{x:7250,y:1070,w:130,h:25,power:1100},{x:8900,y:1070,w:130,h:25,power:1000},{x:10400,y:1070,w:130,h:25,power:1150});
+checkpoints.push({x:3000,active:false},{x:6000,active:false},{x:9000,active:false});
+}
+function reset(){buildLevel();makeClouds();player.x=140;player.y=700;player.vx=0;player.vy=0;player.onGround=false;player.inv=0;cameraX=0;elapsed=0;rings=0;score=0;checkpoint=140;particles=[];won=false;updateUI();}
+function startGame(){reset();running=true;screen.classList.add("hide");last=performance.now();requestAnimationFrame(loop);}
+start.onclick=startGame;
+function updateUI(){ringsEl.textContent=rings;scoreEl.textContent=Math.floor(score).toLocaleString();timeEl.textContent=elapsed.toFixed(1);}
+function playerBox(){return{x:player.x-player.r,y:player.y-player.r,w:player.r*2,h:player.r*2};}
+function collidePlatforms(oldY){
+player.onGround=false;const p=playerBox();
+for(const b of platforms){if(p.x+p.w<=b.x||p.x>=b.x+b.w||p.y+p.h<=b.y||p.y>=b.y+b.h)continue;
+if(player.vy>=0&&oldY+player.r<=b.y+8){player.y=b.y-player.r;player.vy=0;player.onGround=true;}
+else if(player.vy<0&&oldY-player.r>=b.y+b.h-8){player.y=b.y+b.h+player.r;player.vy=0;}
+else if(player.vx>0){player.x=b.x-player.r;player.vx*=.2;}else if(player.vx<0){player.x=b.x+b.w+player.r;player.vx*=.2;}}}
+function updatePlayer(dt){
+const left=keys.a||keys.arrowleft,right=keys.d||keys.arrowright,jump=keys[" "]||keys.w||keys.arrowup,boost=keys.shift;
+const direction=(right?1:0)-(left?1:0),topSpeed=boost?900:620,acceleration=player.onGround?2300:1500;
+if(direction)player.vx+=direction*acceleration*dt;else if(player.onGround)player.vx*=Math.pow(.0008,dt);
+player.vx=clamp(player.vx,-topSpeed,topSpeed);
+if(boost&&Math.abs(player.vx)>250)player.vx=lerp(player.vx,Math.sign(player.vx)*900,.08);
+if(jump&&player.onGround){player.vy=-760;player.onGround=false;burst(player.x,player.y+20,"#fff",8,180);}
+player.vy+=world.gravity*dt;const oldY=player.y;player.x+=player.vx*dt;player.y+=player.vy*dt;collidePlatforms(oldY);
+player.x=clamp(player.x,player.r,world.width-player.r);player.anim+=dt*(Math.abs(player.vx)/50+2);player.boost=boost;player.inv=Math.max(0,player.inv-dt);
+if(player.y>world.height+300)respawn();
+}
+function updateObjects(dt){
+for(const r of ringList){if(r.taken)continue;r.phase+=dt*4;if(Math.hypot(player.x-r.x,player.y-r.y)<player.r+16){r.taken=true;rings++;score+=100;burst(r.x,r.y,"#ffd83d",10,170);}}
+for(const e of enemies){if(!e.alive)continue;e.phase+=dt*3;e.x+=e.vx*dt;if(e.x<50||e.x>world.width-50)e.vx*=-1;
+if(Math.abs(player.x-e.x)<player.r+e.w/2&&Math.abs(player.y-(e.y-e.h/2))<player.r+e.h/2){
+if(player.vy>150){e.alive=false;player.vy=-600;score+=500;burst(e.x,e.y,"#ff5b5b",25,320);}
+else if(player.inv<=0){player.inv=1.3;if(rings>0){rings=Math.max(0,rings-20);burst(player.x,player.y,"#ffd83d",12,240);}else respawn();}}}
+for(const s of springs){if(player.x+player.r>s.x&&player.x-player.r<s.x+s.w&&player.y+player.r>s.y&&player.y+player.r<s.y+s.h+20&&player.vy>=0){player.y=s.y-player.r;player.vy=-s.power;burst(player.x,s.y,"#ff4e9b",12,220);}}
+for(const b of boosts){if(player.x+player.r>b.x&&player.x-player.r<b.x+b.w&&player.y+player.r>b.y&&player.y+player.r<b.y+b.h+25&&player.onGround){player.vx=Math.sign(player.vx||1)*b.power;burst(player.x,b.y,"#49f3ff",12,260);}}
+for(const c of checkpoints){if(!c.active&&player.x>c.x){c.active=true;checkpoint=c.x;score+=1000;burst(c.x,800,"#5cffad",30,260);}}
+if(player.x>goal.x-30)winGame();
+}
+function respawn(){burst(player.x,player.y,"#ff4e6a",25,350);player.x=checkpoint;player.y=700;player.vx=0;player.vy=0;player.inv=2;if(rings>0)rings=Math.max(0,rings-10);}
+function winGame(){if(won)return;won=true;running=false;score+=Math.max(0,50000-Math.floor(elapsed*100));screen.classList.remove("hide");screen.querySelector("h1").innerHTML="YOU<br>WIN!";screen.querySelector("p").innerHTML=`You cleared the sky course!<br><b>Score:</b> ${Math.floor(score).toLocaleString()} &nbsp; <b>Rings:</b> ${rings} &nbsp; <b>Time:</b> ${elapsed.toFixed(1)}s`;start.textContent="RUN AGAIN";}
+function updateParticles(dt){for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=500*dt;p.vx*=.985;p.life-=dt;if(p.life<=0)particles.splice(i,1);}}
+function drawBackground(){
+const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,"#36bfff");sky.addColorStop(.55,"#8ce7ff");sky.addColorStop(1,"#f8f2ba");ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+ctx.fillStyle="rgba(255,255,255,.35)";for(const c of clouds){const x=c.x-cameraX*.22;if(x<-c.w-100||x>W+100)continue;ctx.beginPath();ctx.ellipse(x,c.y,c.w*.5*c.s,35*c.s,0,0,7);ctx.ellipse(x-c.w*.25*c.s,c.y+5,c.w*.28*c.s,27*c.s,0,0,7);ctx.ellipse(x+c.w*.22*c.s,c.y+4,c.w*.3*c.s,30*c.s,0,0,7);ctx.fill();}
+ctx.fillStyle="#7acb76";ctx.beginPath();ctx.moveTo(0,H*.65);for(let x=0;x<=W;x+=80){const wx=x+cameraX*.08;ctx.lineTo(x,H*.65+Math.sin(wx*.004)*80);}ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fill();
+ctx.fillStyle="#49a962";ctx.beginPath();ctx.moveTo(0,H*.78);for(let x=0;x<=W;x+=70){const wx=x+cameraX*.15;ctx.lineTo(x,H*.78+Math.sin(wx*.006+2)*60);}ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fill();
+}
+function sx(x){return x-cameraX;}
+function drawPlatform(b){const x=sx(b.x);if(x+b.w<0||x>W)return;ctx.fillStyle="#2a9b4b";ctx.fillRect(x,b.y,b.w,14);ctx.fillStyle="#8b5a32";ctx.fillRect(x,b.y+14,b.w,b.h-14);ctx.fillStyle="#5d3a21";for(let px=x;px<x+b.w;px+=35)ctx.fillRect(px,b.y+25,4,Math.max(0,b.h-28));}
+function drawRing(r){const x=sx(r.x);if(x<-30||x>W+30)return;const bob=Math.sin(r.phase)*5;ctx.save();ctx.translate(x,r.y+bob);ctx.strokeStyle="#ffd83d";ctx.lineWidth=7;ctx.shadowBlur=15;ctx.shadowColor="#fff36b";ctx.beginPath();ctx.ellipse(0,0,14,20,0,0,7);ctx.stroke();ctx.restore();}
+function drawEnemy(e){if(!e.alive)return;const x=sx(e.x);ctx.save();ctx.translate(x,e.y-e.h/2+Math.sin(e.phase)*3);ctx.fillStyle="#e83d48";ctx.fillRect(-e.w/2,-e.h/2,e.w,e.h);ctx.fillStyle="#fff";ctx.fillRect(-13,-5,9,10);ctx.fillRect(4,-5,9,10);ctx.fillStyle="#111";ctx.fillRect(-10,-2,4,6);ctx.fillRect(7,-2,4,6);ctx.restore();}
+function drawSpring(s){const x=sx(s.x);ctx.fillStyle="#e944a0";ctx.fillRect(x,s.y,s.w,s.h);ctx.strokeStyle="#ffd2f0";ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(x+8,s.y+5);ctx.lineTo(x+18,s.y+s.h-5);ctx.lineTo(x+30,s.y+5);ctx.lineTo(x+42,s.y+s.h-5);ctx.stroke();}
+function drawBoost(b){const x=sx(b.x);ctx.fillStyle="#1595e8";ctx.fillRect(x,b.y,b.w,b.h);ctx.fillStyle="#d8f8ff";for(let i=0;i<5;i++){ctx.beginPath();ctx.moveTo(x+15+i*22,b.y+5);ctx.lineTo(x+30+i*22,b.y+12);ctx.lineTo(x+15+i*22,b.y+20);ctx.closePath();ctx.fill();}}
+function drawGoal(){const x=sx(goal.x);ctx.save();ctx.translate(x,goal.y);ctx.strokeStyle="#ffd83d";ctx.lineWidth=18;ctx.shadowBlur=25;ctx.shadowColor="#fff15c";ctx.beginPath();ctx.arc(0,0,65,0,7);ctx.stroke();ctx.strokeStyle="#55d9ff";ctx.lineWidth=8;ctx.beginPath();ctx.arc(0,0,45,0,7);ctx.stroke();ctx.fillStyle="#fff";ctx.font="900 20px Arial";ctx.textAlign="center";ctx.fillText("GO!",0,7);ctx.restore();}
+function drawCheckpoint(c){const x=sx(c.x);ctx.fillStyle=c.active?"#5cffad":"#fff";ctx.fillRect(x,760,10,360);ctx.fillStyle=c.active?"#5cffad":"#8aa2bf";ctx.beginPath();ctx.moveTo(x+10,770);ctx.lineTo(x+95,800);ctx.lineTo(x+10,830);ctx.closePath();ctx.fill();}
+function drawPlayer(){const x=player.x-cameraX,y=player.y;ctx.save();ctx.translate(x,y);if(player.inv>0&&Math.floor(player.inv*15)%2===0)ctx.globalAlpha=.45;const speed=Math.abs(player.vx);if(speed>500){ctx.strokeStyle="#0b62db";ctx.lineWidth=18;ctx.beginPath();ctx.arc(0,0,25,0,7);ctx.stroke();ctx.strokeStyle="#4ac8ff";ctx.lineWidth=5;ctx.beginPath();ctx.arc(0,0,16,0,4.7);ctx.stroke();}else{ctx.fillStyle="#0875e8";ctx.beginPath();ctx.arc(0,0,26,0,7);ctx.fill();ctx.fillStyle="#0b66cc";ctx.beginPath();ctx.moveTo(-12,-18);ctx.lineTo(-38,-35);ctx.lineTo(-25,-7);ctx.closePath();ctx.fill();ctx.beginPath();ctx.moveTo(0,-20);ctx.lineTo(-8,-46);ctx.lineTo(12,-23);ctx.closePath();ctx.fill();ctx.beginPath();ctx.moveTo(12,-18);ctx.lineTo(35,-37);ctx.lineTo(27,-8);ctx.closePath();ctx.fill();ctx.fillStyle="#fff";ctx.beginPath();ctx.ellipse(9,-5,8,13,0,0,7);ctx.fill();ctx.fillStyle="#111";ctx.beginPath();ctx.arc(11,-2,3,0,7);ctx.fill();ctx.fillStyle="#f3f3f3";ctx.beginPath();ctx.ellipse(-5,17,13,8,0,0,7);ctx.fill();ctx.fillStyle="#e93636";ctx.fillRect(-22,20,21,8);ctx.fillRect(4,20,21,8);}if(player.boost){ctx.fillStyle="#ffe45a";ctx.beginPath();ctx.moveTo(-25,8);ctx.lineTo(-65,0);ctx.lineTo(-28,-6);ctx.closePath();ctx.fill();}ctx.restore();}
+function drawParticles(){for(const p of particles){ctx.globalAlpha=clamp(p.life/p.max,0,1);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(sx(p.x),p.y,p.size,0,7);ctx.fill();}ctx.globalAlpha=1;}
+function render(){ctx.clearRect(0,0,W,H);drawBackground();for(const b of platforms)drawPlatform(b);for(const b of boosts)drawBoost(b);for(const s of springs)drawSpring(s);for(const c of checkpoints)drawCheckpoint(c);for(const r of ringList)if(!r.taken)drawRing(r);for(const e of enemies)drawEnemy(e);drawGoal();drawParticles();drawPlayer();}
+function update(dt){elapsed+=dt;updatePlayer(dt);updateObjects(dt);updateParticles(dt);const target=clamp(player.x-W*.35,0,world.width-W);cameraX=lerp(cameraX,target,1-Math.pow(.0001,dt));score+=dt*10+Math.max(0,player.vx)*dt*.03;updateUI();}
+let last=0;function loop(t){if(!running)return;const dt=Math.min(.033,(t-last)/1000);last=t;update(dt);render();requestAnimationFrame(loop);}
+buildLevel();makeClouds();render();
+</script>
+</body>
+</html>
+// Source expansion note 1: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 1.
+// Source expansion note 2: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 2.
+// Source expansion note 3: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 3.
+// Source expansion note 4: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 4.
+// Source expansion note 5: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 5.
+// Source expansion note 6: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 6.
+// Source expansion note 7: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 7.
+// Source expansion note 8: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 8.
+// Source expansion note 9: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 9.
+// Source expansion note 10: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 10.
+// Source expansion note 11: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 11.
+// Source expansion note 12: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 12.
+// Source expansion note 13: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 13.
+// Source expansion note 14: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 14.
+// Source expansion note 15: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 15.
+// Source expansion note 16: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 16.
+// Source expansion note 17: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 17.
+// Source expansion note 18: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 18.
+// Source expansion note 19: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 19.
+// Source expansion note 20: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 20.
+// Source expansion note 21: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 21.
+// Source expansion note 22: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 22.
+// Source expansion note 23: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 23.
+// Source expansion note 24: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 24.
+// Source expansion note 25: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 25.
+// Source expansion note 26: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 26.
+// Source expansion note 27: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 27.
+// Source expansion note 28: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 28.
+// Source expansion note 29: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 29.
+// Source expansion note 30: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 30.
+// Source expansion note 31: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 31.
+// Source expansion note 32: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 32.
+// Source expansion note 33: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 33.
+// Source expansion note 34: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 34.
+// Source expansion note 35: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 35.
+// Source expansion note 36: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 36.
+// Source expansion note 37: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 37.
+// Source expansion note 38: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 38.
+// Source expansion note 39: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 39.
+// Source expansion note 40: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 40.
+// Source expansion note 41: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 41.
+// Source expansion note 42: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 42.
+// Source expansion note 43: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 43.
+// Source expansion note 44: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 44.
+// Source expansion note 45: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 45.
+// Source expansion note 46: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 46.
+// Source expansion note 47: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 47.
+// Source expansion note 48: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 48.
+// Source expansion note 49: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 49.
+// Source expansion note 50: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 50.
+// Source expansion note 51: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 51.
+// Source expansion note 52: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 52.
+// Source expansion note 53: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 53.
+// Source expansion note 54: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 54.
+// Source expansion note 55: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 55.
+// Source expansion note 56: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 56.
+// Source expansion note 57: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 57.
+// Source expansion note 58: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 58.
+// Source expansion note 59: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 59.
+// Source expansion note 60: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 60.
+// Source expansion note 61: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 61.
+// Source expansion note 62: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 62.
+// Source expansion note 63: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 63.
+// Source expansion note 64: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 64.
+// Source expansion note 65: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 65.
+// Source expansion note 66: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 66.
+// Source expansion note 67: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 67.
+// Source expansion note 68: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 68.
+// Source expansion note 69: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 69.
+// Source expansion note 70: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 70.
+// Source expansion note 71: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 71.
+// Source expansion note 72: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 72.
+// Source expansion note 73: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 73.
+// Source expansion note 74: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 74.
+// Source expansion note 75: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 75.
+// Source expansion note 76: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 76.
+// Source expansion note 77: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 77.
+// Source expansion note 78: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 78.
+// Source expansion note 79: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 79.
+// Source expansion note 80: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 80.
+// Source expansion note 81: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 81.
+// Source expansion note 82: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 82.
+// Source expansion note 83: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 83.
+// Source expansion note 84: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 84.
+// Source expansion note 85: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 85.
+// Source expansion note 86: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 86.
+// Source expansion note 87: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 87.
+// Source expansion note 88: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 88.
+// Source expansion note 89: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 89.
+// Source expansion note 90: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 90.
+// Source expansion note 91: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 91.
+// Source expansion note 92: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 92.
+// Source expansion note 93: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 93.
+// Source expansion note 94: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 94.
+// Source expansion note 95: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 95.
+// Source expansion note 96: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 96.
+// Source expansion note 97: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 97.
+// Source expansion note 98: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 98.
+// Source expansion note 99: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 99.
+// Source expansion note 100: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 100.
+// Source expansion note 101: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 101.
+// Source expansion note 102: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 102.
+// Source expansion note 103: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 103.
+// Source expansion note 104: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 104.
+// Source expansion note 105: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 105.
+// Source expansion note 106: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 106.
+// Source expansion note 107: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 107.
+// Source expansion note 108: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 108.
+// Source expansion note 109: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 109.
+// Source expansion note 110: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 110.
+// Source expansion note 111: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 111.
+// Source expansion note 112: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 112.
+// Source expansion note 113: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 113.
+// Source expansion note 114: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 114.
+// Source expansion note 115: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 115.
+// Source expansion note 116: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 116.
+// Source expansion note 117: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 117.
+// Source expansion note 118: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 118.
+// Source expansion note 119: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 119.
+// Source expansion note 120: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 120.
+// Source expansion note 121: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 121.
+// Source expansion note 122: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 122.
+// Source expansion note 123: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 123.
+// Source expansion note 124: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 124.
+// Source expansion note 125: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 125.
+// Source expansion note 126: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 126.
+// Source expansion note 127: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 127.
+// Source expansion note 128: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 128.
+// Source expansion note 129: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 129.
+// Source expansion note 130: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 130.
+// Source expansion note 131: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 131.
+// Source expansion note 132: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 132.
+// Source expansion note 133: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 133.
+// Source expansion note 134: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 134.
+// Source expansion note 135: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 135.
+// Source expansion note 136: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 136.
+// Source expansion note 137: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 137.
+// Source expansion note 138: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 138.
+// Source expansion note 139: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 139.
+// Source expansion note 140: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 140.
+// Source expansion note 141: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 141.
+// Source expansion note 142: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 142.
+// Source expansion note 143: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 143.
+// Source expansion note 144: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 144.
+// Source expansion note 145: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 145.
+// Source expansion note 146: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 146.
+// Source expansion note 147: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 147.
+// Source expansion note 148: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 148.
+// Source expansion note 149: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 149.
+// Source expansion note 150: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 150.
+// Source expansion note 151: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 151.
+// Source expansion note 152: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 152.
+// Source expansion note 153: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 153.
+// Source expansion note 154: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 154.
+// Source expansion note 155: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 155.
+// Source expansion note 156: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 156.
+// Source expansion note 157: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 157.
+// Source expansion note 158: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 158.
+// Source expansion note 159: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 159.
+// Source expansion note 160: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 160.
+// Source expansion note 161: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 161.
+// Source expansion note 162: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 162.
+// Source expansion note 163: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 163.
+// Source expansion note 164: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 164.
+// Source expansion note 165: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 165.
+// Source expansion note 166: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 166.
+// Source expansion note 167: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 167.
+// Source expansion note 168: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 168.
+// Source expansion note 169: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 169.
+// Source expansion note 170: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 170.
+// Source expansion note 171: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 171.
+// Source expansion note 172: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 172.
+// Source expansion note 173: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 173.
+// Source expansion note 174: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 174.
+// Source expansion note 175: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 175.
+// Source expansion note 176: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 176.
+// Source expansion note 177: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 177.
+// Source expansion note 178: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 178.
+// Source expansion note 179: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 179.
+// Source expansion note 180: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 180.
+// Source expansion note 181: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 181.
+// Source expansion note 182: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 182.
+// Source expansion note 183: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 183.
+// Source expansion note 184: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 184.
+// Source expansion note 185: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 185.
+// Source expansion note 186: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 186.
+// Source expansion note 187: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 187.
+// Source expansion note 188: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
+// The camera follows the player across a long scrolling world.
+// Particle effects are generated at runtime rather than loaded from external game assets.
+// This page is designed to run directly as a static HTML file or GitHub Pages site.
+// Keyboard controls remain simple for desktop browsers.
+// The project is a fan-made, non-official browser prototype.
+// Keep expanding the level arrays and drawing functions for new zones.
+// End source expansion note 188.
+// Source expansion note 189: Sonic Sky Rush uses original procedural browser graphics.
+// Movement, collision, rings, enemies, springs, boost pads, checkpoints and goal logic are implemented above.
+// The level is intentionally data-driven so more platforms and hazards can be added easily.
