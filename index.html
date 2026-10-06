@@ -19,12 +19,14 @@ button{font-size:20px;font-weight:900;padding:14px 28px;border:0;border-radius:1
 </head>
 <body>
 <canvas id="game"></canvas>
+<audio id="music" src="Dansez.mp3" preload="auto" loop></audio>
 <div id="ui"><span class="pill">RINGS: <b id="rings">0</b></span><span class="pill">SCORE: <b id="score">0</b></span><span class="pill">TIME: <b id="time">0.0</b></span></div>
 <div id="screen"><div class="card"><h1>SONIC<br>SKY RUSH</h1><p>Fast, original browser fan-game code with canvas graphics, rings, springs, enemies, platforms, checkpoints, boost pads and a goal portal.</p><p><b>MOVE:</b> A/D or Arrow Keys &nbsp; <b>JUMP:</b> Space/W/Up &nbsp; <b>BOOST:</b> Shift</p><button id="start">START RUN</button></div></div>
 <script>
 "use strict";
 const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
 const ringsEl=document.getElementById("rings"),scoreEl=document.getElementById("score"),timeEl=document.getElementById("time"),screen=document.getElementById("screen"),start=document.getElementById("start");
+const music=document.getElementById("music");
 let W=innerWidth,H=innerHeight,dpr=1;
 function resize(){W=innerWidth;H=innerHeight;dpr=Math.min(devicePixelRatio||1,2);canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);}
 addEventListener("resize",resize);resize();
@@ -57,7 +59,7 @@ boosts.push({x:1650,y:1070,w:130,h:25,power:950},{x:3150,y:1070,w:130,h:25,power
 checkpoints.push({x:3000,active:false},{x:6000,active:false},{x:9000,active:false});
 }
 function reset(){buildLevel();makeClouds();player.x=140;player.y=700;player.vx=0;player.vy=0;player.onGround=false;player.inv=0;cameraX=0;elapsed=0;rings=0;score=0;checkpoint=140;particles=[];won=false;updateUI();}
-function startGame(){reset();running=true;screen.classList.add("hide");last=performance.now();requestAnimationFrame(loop);}
+function startGame(){reset();running=true;screen.classList.add("hide");music.currentTime=0;music.volume=.65;music.play().catch(()=>{});last=performance.now();requestAnimationFrame(loop);}
 start.onclick=startGame;
 function updateUI(){ringsEl.textContent=rings;scoreEl.textContent=Math.floor(score).toLocaleString();timeEl.textContent=elapsed.toFixed(1);}
 function playerBox(){return{x:player.x-player.r,y:player.y-player.r,w:player.r*2,h:player.r*2};}
@@ -90,7 +92,7 @@ for(const c of checkpoints){if(!c.active&&player.x>c.x){c.active=true;checkpoint
 if(player.x>goal.x-30)winGame();
 }
 function respawn(){burst(player.x,player.y,"#ff4e6a",25,350);player.x=checkpoint;player.y=700;player.vx=0;player.vy=0;player.inv=2;if(rings>0)rings=Math.max(0,rings-10);}
-function winGame(){if(won)return;won=true;running=false;score+=Math.max(0,50000-Math.floor(elapsed*100));screen.classList.remove("hide");screen.querySelector("h1").innerHTML="YOU<br>WIN!";screen.querySelector("p").innerHTML=`You cleared the sky course!<br><b>Score:</b> ${Math.floor(score).toLocaleString()} &nbsp; <b>Rings:</b> ${rings} &nbsp; <b>Time:</b> ${elapsed.toFixed(1)}s`;start.textContent="RUN AGAIN";}
+function winGame(){if(won)return;won=true;running=false;music.pause();score+=Math.max(0,50000-Math.floor(elapsed*100));screen.classList.remove("hide");screen.querySelector("h1").innerHTML="YOU<br>WIN!";screen.querySelector("p").innerHTML=`You cleared the sky course!<br><b>Score:</b> ${Math.floor(score).toLocaleString()} &nbsp; <b>Rings:</b> ${rings} &nbsp; <b>Time:</b> ${elapsed.toFixed(1)}s`;start.textContent="RUN AGAIN";}
 function updateParticles(dt){for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=500*dt;p.vx*=.985;p.life-=dt;if(p.life<=0)particles.splice(i,1);}}
 function drawBackground(){
 const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,"#36bfff");sky.addColorStop(.55,"#8ce7ff");sky.addColorStop(1,"#f8f2ba");ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
